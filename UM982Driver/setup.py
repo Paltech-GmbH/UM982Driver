@@ -26,6 +26,7 @@ setup(
     },
     install_requires=[
         "numpy",
-        "pyproj"
+        "pyproj",
+        "pyrtcm"
     ],
 )

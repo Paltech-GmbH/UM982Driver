@@ -3,7 +3,9 @@ import threading
 import serial
 import time
 import math
-
+import base64
+import socket
+from pyrtcm import RTCMMessage
 
 
 def crc_table():
@@ -75,6 +77,12 @@ def GNHPR_solver(msg:str):
     orientation = (heading, pitch, roll)
     return orientation
 
+def UNIHEADING_solver(msg:str):
+    parts = msg_seperate(msg)
+    heading = float(parts[5+7])
+    hdgstddev = float(parts[8+7])
+    uniheading_msg = (heading, hdgstddev)
+    return uniheading_msg
 
 def BESTNAV_solver(msg:str):
     parts = msg_seperate(msg)
@@ -128,9 +136,30 @@ def utm_trans(transformer, lon, lat):
     utm_x, utm_y           = transformer.transform(lon, lat)
     return (utm_x, utm_y)
 
+def string_to_base64(input_string):
+    input_bytes = input_string.encode("utf-8")
+    base64_encoded = base64.b64encode(input_bytes)
+    return base64_encoded.decode("utf-8")
+
+def connect_ntrip(host, port, mountpoint, username, password):
+    """Connect to NTRIP caster and stream RTCM data."""
+    auth = string_to_base64(f"{username}:{password}")
+    authorization = f"Authorization: Basic {auth}\r\n"
+    url = f"/{mountpoint}\r\n"
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect((host, port))
+    request = f"GET {url}HTTP/1.1\r\nUser-Agent: NTRIP GNSSInternetRadio/1.4.10\r\nAccept: */*\r\nConnection: close\r\n{authorization}\r\n"
+    sock.sendall(request.encode())
+
+    response = sock.recv(2048)
+
+    if b"ICY 200 OK" not in response:
+        raise ConnectionError("Failed to connect to NTRIP caster")
+    return sock
+
 
 class UM982Serial(threading.Thread):
-    def __init__(self, port, band):
+    def __init__(self, port, band, ntrip_host, ntrip_port, mountpoint, username, password):
         super().__init__()
         # 打开串口
         self.ser            = serial.Serial(port, band)
@@ -141,13 +170,22 @@ class UM982Serial(threading.Thread):
         self.orientation    = None   # 航向角
         self.vel            = None   # 速度
         self.utmpos         = None
+        self.uniheading     = None
+        self.ntrip_socket   = None
         # 读初始数据
+        try:
+            self.ntrip_socket = connect_ntrip(ntrip_host, ntrip_port, mountpoint, username, password)
+            print("Connected to NTRIP Caster.")
+        except Exception as e:
+            print(f"Error: {e}")
+            return
         for i in range(10):
             self.read_frame()
         # wgs84转utm
-        bestpos_hgt, bestpos_lat, bestpos_lon, bestpos_hgtstd, bestpos_latstd, bestpos_lonstd = self.fix
-        self.transformer = create_utm_trans(bestpos_lat, bestpos_lon)
-        self.utmpos      = utm_trans(self.transformer, bestpos_lon, bestpos_lat)
+        if self.fix is not None:
+            bestpos_hgt, bestpos_lat, bestpos_lon, bestpos_hgtstd, bestpos_latstd, bestpos_lonstd = self.fix
+            self.transformer = create_utm_trans(bestpos_lat, bestpos_lon)
+            self.utmpos      = utm_trans(self.transformer, bestpos_lon, bestpos_lat)
 
 
     def stop(self):
@@ -156,22 +194,38 @@ class UM982Serial(threading.Thread):
         time.sleep(0.1)
         self.ser.close()
 
+    def forward_to_serial(self, sock, gga_message):
+        """Read RTCM data from NTRIP and forward to serial port."""
+        # with serial.Serial(SERIAL_PORT, BAUDRATE, timeout=1) as ser:
+        sock.sendall(gga_message.encode())
+        data, _ = sock.recvfrom(1024)
+        rtcm_message = RTCMMessage(data)
+        if rtcm_message:
+            self.ser.write(data)
 
     def read_frame(self):
         frame = self.ser.readline().decode('utf-8')
+        if frame.startswith("$GNGGA"):
+            self.last_gga = frame
         if frame.startswith("#PVTSLNA") and nmea_expend_crc(frame):
             self.fix = PVTSLN_solver(frame)
         elif frame.startswith("$GNHPR") and nmea_crc(frame):
             self.orientation = GNHPR_solver(frame)
         elif frame.startswith("#BESTNAVA") and nmea_expend_crc(frame):
             self.vel = BESTNAV_solver(frame)
+        elif frame.startswith("#UNIHEADINGA") and nmea_expend_crc(frame):
+            self.uniheading = UNIHEADING_solver(frame)
+    
+    def send_rtcm(self):
+        if self.ntrip_socket is not None:
+            self.forward_to_serial(self.ntrip_socket, self.last_gga)
 
 
     def run(self):
         while self.isRUN:
             self.read_frame()
-            bestpos_hgt, bestpos_lat, bestpos_lon, bestpos_hgtstd, bestpos_latstd, bestpos_lonstd = self.fix
-            self.utmpos = utm_trans(self.transformer, bestpos_lon, bestpos_lat)
+            # bestpos_hgt, bestpos_lat, bestpos_lon, bestpos_hgtstd, bestpos_latstd, bestpos_lonstd = self.fix
+            # self.utmpos = utm_trans(self.transformer, bestpos_lon, bestpos_lat)
 
 
 

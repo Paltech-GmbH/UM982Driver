@@ -151,14 +151,14 @@ def connect_ntrip(host, port, mountpoint, username, password):
     request = f"GET {url}HTTP/1.1\r\nUser-Agent: NTRIP GNSSInternetRadio/1.4.10\r\nAccept: */*\r\nConnection: close\r\n{authorization}\r\n"
     sock.sendall(request.encode())
 
-    response = sock.recv(2048)
+    response = sock.recv(1024)
 
     if b"ICY 200 OK" not in response:
         raise ConnectionError("Failed to connect to NTRIP caster")
     return sock
 
 
-class UM982Serial(threading.Thread):
+class UM982Serial():
     def __init__(self, port, band, ntrip_host, ntrip_port, mountpoint, username, password):
         super().__init__()
         # 打开串口
@@ -172,6 +172,7 @@ class UM982Serial(threading.Thread):
         self.utmpos         = None
         self.uniheading     = None
         self.ntrip_socket   = None
+        self.last_gga       = None
         # 读初始数据
         try:
             self.ntrip_socket = connect_ntrip(ntrip_host, ntrip_port, mountpoint, username, password)
@@ -181,27 +182,16 @@ class UM982Serial(threading.Thread):
             return
         for i in range(10):
             self.read_frame()
-        # wgs84转utm
-        if self.fix is not None:
-            bestpos_hgt, bestpos_lat, bestpos_lon, bestpos_hgtstd, bestpos_latstd, bestpos_lonstd = self.fix
-            self.transformer = create_utm_trans(bestpos_lat, bestpos_lon)
-            self.utmpos      = utm_trans(self.transformer, bestpos_lon, bestpos_lat)
-
-
-    def stop(self):
-        """ 结束运行 """
-        self.isRUN = False
-        time.sleep(0.1)
-        self.ser.close()
 
     def forward_to_serial(self, sock, gga_message):
         """Read RTCM data from NTRIP and forward to serial port."""
         # with serial.Serial(SERIAL_PORT, BAUDRATE, timeout=1) as ser:
         sock.sendall(gga_message.encode())
         data, _ = sock.recvfrom(1024)
-        rtcm_message = RTCMMessage(data)
-        if rtcm_message:
-            self.ser.write(data)
+        if data:
+            rtcm_message = RTCMMessage(data)
+            if rtcm_message:
+                self.ser.write(data)
 
     def read_frame(self):
         frame = self.ser.readline().decode('utf-8')
@@ -217,17 +207,8 @@ class UM982Serial(threading.Thread):
             self.uniheading = UNIHEADING_solver(frame)
     
     def send_rtcm(self):
-        if self.ntrip_socket is not None:
+        if self.ntrip_socket is not None and self.last_gga is not None:
             self.forward_to_serial(self.ntrip_socket, self.last_gga)
-
-
-    def run(self):
-        while self.isRUN:
-            self.read_frame()
-            # bestpos_hgt, bestpos_lat, bestpos_lon, bestpos_hgtstd, bestpos_latstd, bestpos_lonstd = self.fix
-            # self.utmpos = utm_trans(self.transformer, bestpos_lon, bestpos_lat)
-
-
 
 
 if __name__ == "__main__":

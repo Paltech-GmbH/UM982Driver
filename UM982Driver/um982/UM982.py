@@ -68,6 +68,10 @@ def PVTSLN_solver(msg:str):
     fix = (bestpos_hgt, bestpos_lat, bestpos_lon, bestpos_hgtstd, bestpos_latstd, bestpos_lonstd)
     return fix
 
+def GNGGA_solver(msg:str):
+    parts = msg_seperate(msg)
+    quality = int(parts[7-1])
+    return quality
 
 def GNHPR_solver(msg:str):
     parts = msg_seperate(msg)
@@ -173,6 +177,7 @@ class UM982Serial():
         self.uniheading     = None
         self.ntrip_socket   = None
         self.last_gga       = None
+        self.rtk_status     = 0
         # 读初始数据
         try:
             self.ntrip_socket = connect_ntrip(ntrip_host, ntrip_port, mountpoint, username, password)
@@ -195,8 +200,9 @@ class UM982Serial():
 
     def read_frame(self):
         frame = self.ser.readline().decode('utf-8')
-        if frame.startswith("$GNGGA"):
+        if frame.startswith("$GNGGA") and nmea_crc(frame):
             self.last_gga = frame
+            self.rtk_status = GNGGA_solver(frame)
         if frame.startswith("#PVTSLNA") and nmea_expend_crc(frame):
             self.fix = PVTSLN_solver(frame)
         elif frame.startswith("$GNHPR") and nmea_crc(frame):

@@ -194,9 +194,12 @@ class UM982Serial():
         sock.sendall(gga_message.encode())
         data, _ = sock.recvfrom(1024)
         if data:
-            rtcm_message = RTCMMessage(data)
-            if rtcm_message:
-                self.ser.write(data)
+            try:
+                rtcm_message = RTCMMessage(data)
+                if rtcm_message:
+                    self.ser.write(data)
+            except Exception as e:
+                print(f"Error parsing RTCM: {e}")
 
     def read_frame(self):
         frame = self.ser.readline().decode('utf-8')

@@ -192,14 +192,17 @@ class UM982Serial():
         """Read RTCM data from NTRIP and forward to serial port."""
         # with serial.Serial(SERIAL_PORT, BAUDRATE, timeout=1) as ser:
         sock.sendall(gga_message.encode())
-        data, _ = sock.recvfrom(1024)
-        if data:
-            try:
-                rtcm_message = RTCMMessage(data)
-                if rtcm_message:
-                    self.ser.write(data)
-            except Exception as e:
-                print(f"Error parsing RTCM: {e}")
+        try:
+            data, _ = sock.recvfrom(1024)
+            if data:
+                try:
+                    rtcm_message = RTCMMessage(data)
+                    if rtcm_message:
+                        self.ser.write(data)
+                except Exception as e:
+                    print(f"Error parsing RTCM: {e}")
+        except Exception as e:
+            print(f"Error Receiving DATA: {e}")
 
     def read_frame(self):
         frame = self.ser.readline().decode('utf-8')

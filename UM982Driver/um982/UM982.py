@@ -205,18 +205,21 @@ class UM982Serial():
             print(f"Error Receiving DATA: {e}")
 
     def read_frame(self):
-        frame = self.ser.readline().decode('utf-8')
-        if frame.startswith("$GNGGA") and nmea_crc(frame):
-            self.last_gga = frame
-            self.rtk_status = GNGGA_solver(frame)
-        if frame.startswith("#PVTSLNA") and nmea_expend_crc(frame):
-            self.fix = PVTSLN_solver(frame)
-        elif frame.startswith("$GNHPR") and nmea_crc(frame):
-            self.orientation = GNHPR_solver(frame)
-        elif frame.startswith("#BESTNAVA") and nmea_expend_crc(frame):
-            self.vel = BESTNAV_solver(frame)
-        elif frame.startswith("#UNIHEADINGA") and nmea_expend_crc(frame):
-            self.uniheading = UNIHEADING_solver(frame)
+        try:
+            frame = self.ser.readline().decode('utf-8')
+            if frame.startswith("$GNGGA") and nmea_crc(frame):
+                self.last_gga = frame
+                self.rtk_status = GNGGA_solver(frame)
+            if frame.startswith("#PVTSLNA") and nmea_expend_crc(frame):
+                self.fix = PVTSLN_solver(frame)
+            elif frame.startswith("$GNHPR") and nmea_crc(frame):
+                self.orientation = GNHPR_solver(frame)
+            elif frame.startswith("#BESTNAVA") and nmea_expend_crc(frame):
+                self.vel = BESTNAV_solver(frame)
+            elif frame.startswith("#UNIHEADINGA") and nmea_expend_crc(frame):
+                self.uniheading = UNIHEADING_solver(frame)
+        except Exception as e:
+            print(f"Error in read_frame: {e}")
     
     def send_rtcm(self):
         if self.ntrip_socket is not None and self.last_gga is not None:

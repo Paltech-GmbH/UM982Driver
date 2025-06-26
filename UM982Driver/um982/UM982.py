@@ -183,7 +183,13 @@ class UM982Serial:
             print(f"Error Writing RTCM message: {e}")
 
     def read_frame(self):
-        frame = self.ser.readline().decode("utf-8")
+        try:
+            raw_frame = self.ser.readline()
+            frame = raw_frame.decode("utf-8", errors="ignore").strip()
+        except Exception as e:
+            print(f"Decode error: {e}")
+            return  # Skip problematic frame
+
         if frame.startswith("$GNGGA") and nmea_crc(frame):
             self.last_gga = frame
             self.rtk_status = GNGGA_solver(frame)
